@@ -1,0 +1,31 @@
+[Unit]
+Description=HomeNotifier - spoken arrival briefings
+Documentation=https://github.com/your-user/HomeNotifier
+Wants=network-online.target
+After=network-online.target ollama.service
+
+[Service]
+Type=simple
+# Change User/Group and paths if your username or install location differ.
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/HomeNotifier
+EnvironmentFile=/home/pi/HomeNotifier/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/HomeNotifier/.venv/bin/python -m homenotifier
+Restart=on-failure
+RestartSec=10
+
+# Be a good neighbour to the other services on the Pi
+MemoryMax=512M
+Nice=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/HomeNotifier/audio_cache /home/pi/HomeNotifier/secrets
+
+[Install]
+WantedBy=multi-user.target

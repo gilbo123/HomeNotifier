@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# HomeNotifier
+secrets/*
+audio_cache/*
+*.mp3
+!secrets/.gitkeep
+!audio_cache/.gitkeep
