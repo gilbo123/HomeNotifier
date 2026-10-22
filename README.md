@@ -358,7 +358,7 @@ counts as an arrival.
 | GET/POST | `/arrive?force=&delay=` | yes | Trigger the arrival briefing (returns 202 immediately) |
 | GET | `/preview` | yes | Build the briefing text without speaking it |
 | POST | `/say` `{"text": "..."}` | yes | Speak any text |
-| GET | `/audio/{file}.mp3` | no | Used by the speaker to fetch audio |
+| GET/HEAD | `/audio/{file}.mp3` | no | Used by the speaker to fetch audio |
 
 Auth can be sent as `Authorization: Bearer <token>`, `X-Auth-Token: <token>`,
 or `?token=<token>`.

@@ -124,7 +124,7 @@ async def say(req: SayRequest) -> dict:
 _AUDIO_NAME = re.compile(r"^[\w-]+\.mp3$")
 
 
-@app.get("/audio/{name}")
+@app.api_route("/audio/{name}", methods=["GET", "HEAD"])
 async def audio(name: str) -> FileResponse:
     """Served without auth because the speaker can't send headers; names are random."""
     path = settings.audio_dir / name
