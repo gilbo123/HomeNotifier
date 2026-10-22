@@ -64,10 +64,27 @@ def play_url(url: str) -> None:
         mc.play_media(url, "audio/mpeg", title="HomeNotifier")
         mc.block_until_active(timeout=15)
         log.info("Casting %s to %s", url, cast.cast_info.friendly_name)
+        _wait_for_playback(mc, url)
     finally:
         # Playback continues on the speaker after we disconnect.
         browser.stop_discovery()
         cast.disconnect(timeout=5)
+
+
+def _wait_for_playback(mc, url: str, timeout: float = 10.0) -> None:
+    """Raise if the speaker reports it couldn't load the media (e.g. URL unreachable)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = mc.status
+        if status.player_state in ("PLAYING", "BUFFERING"):
+            return
+        if status.player_state == "IDLE" and status.idle_reason == "ERROR":
+            raise RuntimeError(
+                f"Speaker could not load {url}. Check HN_PUBLIC_BASE_URL and that the "
+                "speaker can reach the Pi on that port (firewall?)."
+            )
+        time.sleep(0.25)
+    log.warning("Speaker never reported PLAYING for %s", url)
 
 
 def speak(text: str) -> None:

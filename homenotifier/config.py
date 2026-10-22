@@ -111,10 +111,21 @@ class Settings:
     presence_away_minutes: int = field(default_factory=lambda: _int("PRESENCE_AWAY_MINUTES", 20))
 
     def __post_init__(self) -> None:
-        if not self.public_base_url:
-            self.public_base_url = f"http://{detect_lan_ip()}:{self.port}"
-        self.public_base_url = self.public_base_url.rstrip("/")
+        self.public_base_url = self._normalise_base_url(self.public_base_url)
         self.audio_dir.mkdir(parents=True, exist_ok=True)
+
+    def _normalise_base_url(self, url: str) -> str:
+        """Accept '192.168.1.5', '192.168.1.5:8765' or a full URL; always return scheme://host:port."""
+        url = url.strip().rstrip("/")
+        if not url:
+            return f"http://{detect_lan_ip()}:{self.port}"
+        if "://" not in url:
+            url = f"http://{url}"
+        scheme, rest = url.split("://", 1)
+        host = rest.split("/", 1)[0]
+        if ":" not in host:  # no port given - use the server's port
+            url = url.replace(f"{scheme}://{host}", f"{scheme}://{host}:{self.port}", 1)
+        return url
 
 
 settings = Settings()
