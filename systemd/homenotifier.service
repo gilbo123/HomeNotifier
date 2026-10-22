@@ -1,18 +1,18 @@
 [Unit]
 Description=HomeNotifier - spoken arrival briefings
-Documentation=https://github.com/your-user/HomeNotifier
+Documentation=https://github.com/gilbo123/HomeNotifier
 Wants=network-online.target
 After=network-online.target ollama.service
 
 [Service]
 Type=simple
 # Change User/Group and paths if your username or install location differ.
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/HomeNotifier
-EnvironmentFile=/home/pi/HomeNotifier/.env
+User=server
+Group=server
+WorkingDirectory=/home/server/git/HomeNotifier
+EnvironmentFile=/home/server/git/HomeNotifier/.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/pi/HomeNotifier/.venv/bin/python -m homenotifier
+ExecStart=/home/server/.virtualenvs/notify/bin/python -m homenotifier
 Restart=on-failure
 RestartSec=10
 
@@ -25,7 +25,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/pi/HomeNotifier/audio_cache /home/pi/HomeNotifier/secrets
+ReadWritePaths=/home/server/git/HomeNotifier/audio_cache /home/server/git/HomeNotifier/secrets
 
 [Install]
 WantedBy=multi-user.target
