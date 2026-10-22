@@ -102,8 +102,21 @@ class Settings:
     speaker_name: str = field(default_factory=lambda: _str("SPEAKER_NAME"))
     speaker_ip: str = field(default_factory=lambda: _str("SPEAKER_IP"))
     speaker_volume: float | None = field(default_factory=lambda: _float("SPEAKER_VOLUME", None))
+    # "piper" (local neural voice, recommended) or "gtts" (Google Translate voice, needs internet)
+    tts_engine: str = field(default_factory=lambda: _str("TTS_ENGINE", "piper").lower())
     tts_lang: str = field(default_factory=lambda: _str("TTS_LANG", "en"))
     tts_tld: str = field(default_factory=lambda: _str("TTS_TLD", "com.au"))
+    # Silence (ms): at the start (Nest speakers clip the first moment of audio),
+    # after a section heading like "Weather.", and between sections.
+    tts_leading_silence_ms: int = field(default_factory=lambda: _int("TTS_LEADING_SILENCE_MS", 600))
+    tts_heading_pause_ms: int = field(default_factory=lambda: _int("TTS_HEADING_PAUSE_MS", 450))
+    tts_section_pause_ms: int = field(default_factory=lambda: _int("TTS_SECTION_PAUSE_MS", 900))
+
+    # --- Piper TTS ---
+    piper_voice: str = field(default_factory=lambda: _str("PIPER_VOICE", "en_GB-jenny_dioco-medium"))
+    piper_voice_dir: Path = field(default_factory=lambda: _path("PIPER_VOICE_DIR", "voices"))
+    # >1.0 = slower speech, <1.0 = faster
+    piper_length_scale: float = field(default_factory=lambda: _float("PIPER_LENGTH_SCALE", 1.0))
 
     # --- Optional Wi-Fi presence detection (no phone app needed) ---
     presence_phone_ip: str = field(default_factory=lambda: _str("PRESENCE_PHONE_IP"))

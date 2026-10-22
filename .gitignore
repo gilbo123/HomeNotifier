@@ -225,3 +225,4 @@ audio_cache/*
 *.mp3
 !secrets/.gitkeep
 !audio_cache/.gitkeep
+voices/

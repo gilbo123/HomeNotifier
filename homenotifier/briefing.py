@@ -8,17 +8,37 @@ from dataclasses import dataclass, field
 
 from . import calendar_client, llm, speaker, weather
 from .config import settings
+from .speaker import Pause, Script
 from .timeutil import now
 
 log = logging.getLogger(__name__)
 
+WEATHER_HEADING = "Weather."
+CALENDAR_HEADING = "Calendar."
+
 
 @dataclass
 class Briefing:
-    message: str
-    weather: str
+    greeting: str
+    weather: str = ""  # spoken weather section ("" = skip)
+    calendar: str = ""  # spoken calendar section ("" = skip)
     events: list[str] = field(default_factory=list)
     used_llm: bool = True
+
+    def script(self) -> Script:
+        """Greeting, then each section as: heading, short pause, body, longer pause."""
+        heading_pause = Pause(settings.tts_heading_pause_ms)
+        section_pause = Pause(settings.tts_section_pause_ms)
+        script: Script = [self.greeting]
+        for heading, body in ((WEATHER_HEADING, self.weather), (CALENDAR_HEADING, self.calendar)):
+            if body:
+                script += [section_pause, heading, heading_pause, body]
+        return script
+
+    @property
+    def message(self) -> str:
+        """Readable text version of the script (pauses shown as ' ... ')."""
+        return " ".join("..." if isinstance(i, Pause) else i for i in self.script())
 
 
 def _time_of_day() -> str:
@@ -30,15 +50,12 @@ def _time_of_day() -> str:
     return "evening"
 
 
-def _fallback_message(name: str, weather_text: str, events: list[str], calendar_ok: bool) -> str:
-    parts = [f"Welcome home, {name}. Good {_time_of_day()}."]
-    if weather_text != "unavailable":
-        parts.append(weather_text)
-    if events:
-        parts.append("Coming up: " + "; ".join(events) + ".")
-    elif calendar_ok:
-        parts.append("You have nothing coming up in your calendar.")
-    return " ".join(parts)
+def _template_calendar(events: list[str]) -> str:
+    if not events:
+        return "Your calendar is clear."
+    if len(events) == 1:
+        return f"Your next event is {events[0]}."
+    return f"Your next event is {events[0]}. " + " ".join(f"Then {e}." for e in events[1:])
 
 
 async def build_briefing() -> Briefing:
@@ -50,35 +67,46 @@ async def build_briefing() -> Briefing:
 
     if isinstance(weather_res, Exception):
         log.warning("Weather unavailable: %s", weather_res)
-        weather_text = "unavailable"
+        weather_facts = None
     else:
-        weather_text = weather_res.spoken()
+        weather_facts = weather_res.spoken()
 
     if isinstance(events_res, Exception):
         log.warning("Calendar unavailable: %s", events_res)
-        events: list[str] = []
-        events_note = ["Calendar unavailable."]
+        events: list[str] | None = None
     else:
         events = [e.spoken(today) for e in events_res]
-        events_note = events
 
-    prompt = llm.build_prompt(settings.owner_name, _time_of_day(), weather_text, events_note)
+    # Deterministic versions - used if the LLM fails or leaves a section empty.
+    template = {
+        "greeting": f"Welcome home, {settings.owner_name}. Good {_time_of_day()}.",
+        "weather": weather_facts or "",
+        "calendar": _template_calendar(events) if events is not None else "",
+    }
+
+    prompt = llm.build_prompt(settings.owner_name, _time_of_day(), weather_facts or "unavailable", events)
     try:
-        message = await llm.generate_message(prompt)
-        return Briefing(message=message, weather=weather_text, events=events)
+        sections = await llm.generate_sections(prompt)
+        used_llm = True
     except Exception as exc:  # noqa: BLE001 - always say *something*
         log.warning("LLM failed (%s); using template message", exc)
-        return Briefing(
-            message=_fallback_message(
-                settings.owner_name, weather_text, events, calendar_ok=not isinstance(events_res, Exception)
-            ),
-            weather=weather_text,
-            events=events,
-            used_llm=False,
-        )
+        sections, used_llm = {}, False
+
+    def pick(name: str) -> str:
+        if not template[name]:  # facts unavailable -> skip the section entirely
+            return ""
+        return sections.get(name) or template[name]
+
+    return Briefing(
+        greeting=pick("greeting"),
+        weather=pick("weather"),
+        calendar=pick("calendar"),
+        events=events or [],
+        used_llm=used_llm,
+    )
 
 
 async def announce() -> Briefing:
     briefing = await build_briefing()
-    await asyncio.to_thread(speaker.speak, briefing.message)
+    await asyncio.to_thread(speaker.speak, briefing.script())
     return briefing

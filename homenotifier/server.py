@@ -60,6 +60,17 @@ async def lifespan(app: FastAPI):
         log.warning("HN_AUTH_TOKEN is not set - endpoints are UNAUTHENTICATED")
     log.info("Audio will be served from %s/audio/", settings.public_base_url)
 
+    if settings.tts_engine == "piper":
+        # Load the voice in the background so the first announcement isn't delayed
+        # and a missing voice file shows up in the logs straight away.
+        async def _preload() -> None:
+            try:
+                await asyncio.to_thread(speaker.load_piper)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Piper voice not loaded (%s) - will fall back to gTTS", exc)
+
+        asyncio.create_task(_preload())
+
     watcher = None
     if settings.presence_phone_ip:
         watcher = asyncio.create_task(presence.watch(handle_arrival))
@@ -104,7 +115,14 @@ async def arrive(
 async def preview() -> dict:
     """Build the briefing text without speaking it - handy for testing."""
     b = await briefing.build_briefing()
-    return {"message": b.message, "weather": b.weather, "events": b.events, "used_llm": b.used_llm}
+    return {
+        "message": b.message,
+        "greeting": b.greeting,
+        "weather": b.weather,
+        "calendar": b.calendar,
+        "events": b.events,
+        "used_llm": b.used_llm,
+    }
 
 
 class SayRequest(BaseModel):
@@ -121,7 +139,7 @@ async def say(req: SayRequest) -> dict:
     return {"status": "spoken"}
 
 
-_AUDIO_NAME = re.compile(r"^[\w-]+\.mp3$")
+_AUDIO_NAME = re.compile(r"^[\w-]+\.(mp3|wav)$")
 
 
 @app.api_route("/audio/{name}", methods=["GET", "HEAD"])
@@ -130,4 +148,4 @@ async def audio(name: str) -> FileResponse:
     path = settings.audio_dir / name
     if not _AUDIO_NAME.match(name) or not path.is_file():
         raise HTTPException(status_code=404)
-    return FileResponse(path, media_type="audio/mpeg")
+    return FileResponse(path, media_type=speaker.CONTENT_TYPES[path.suffix])

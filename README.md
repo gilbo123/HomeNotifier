@@ -3,9 +3,11 @@
 A small server for a Raspberry Pi 5 that notices when you get home and has your
 Google Nest / Home speaker give you a short spoken briefing:
 
-> "Welcome home Gilbert! It's 21 degrees and partly cloudy, with a 10% chance of
-> rain. Next up you've got Dentist tomorrow at 9:30 AM, then Team standup at
-> 10 AM, and Mum's birthday dinner on Saturday at 6 PM."
+> "Welcome home Gilbert, hope your afternoon went well!
+> *(pause)* **Weather.** *(pause)* Right now it's partly cloudy and 21 degrees, with a
+> 10 percent chance of rain.
+> *(pause)* **Calendar.** *(pause)* Your next event is Dentist tomorrow at 9:30 AM, then
+> Team standup at 10 AM, and Mum's birthday dinner on Saturday at 6 PM."
 
 ```mermaid
 flowchart LR
@@ -14,16 +16,19 @@ flowchart LR
     server["HomeNotifier (FastAPI on Pi)"] --> cal["Google Calendar API: next 3 events"]
     server --> wx["Open-Meteo weather"]
     server --> llm["Ollama: qwen2.5:1.5b"]
-    server --> tts["gTTS to MP3"]
+    server --> tts["Piper local voice to WAV"]
     tts --> speaker["Google Nest speaker (Cast)"]
 ```
 
 - **Calendar:** Google Calendar API (read-only).
 - **Weather:** [Open-Meteo](https://open-meteo.com/). Free, no API key.
-- **Wording:** a small Qwen model running locally in Ollama. If Ollama is down
-  you still get a plain template message.
-- **Voice:** Google TTS (gTTS) renders an MP3. The Pi serves it, and the speaker
-  plays it over Google Cast. No Google Assistant SDK is needed.
+- **Wording:** a small Qwen model running locally in Ollama writes separate
+  greeting, weather and calendar sections. If Ollama is down you still get a
+  plain template message.
+- **Voice:** [Piper](https://github.com/OHF-Voice/piper1-gpl), a natural-sounding
+  neural voice that runs locally (about 100 MB RAM). It adds headings and real
+  pauses between sections. The Pi serves the audio file and the speaker plays
+  it over Google Cast. gTTS is available as a fallback.
 - **Triggers:** your phone calls `/arrive` when it connects to the home Wi-Fi.
   There's also an optional built-in watcher that pings your phone, so you
   don't need an app at all.
@@ -34,7 +39,7 @@ flowchart LR
 
 1. [Which Android phones can trigger this?](#1-which-android-phones-can-trigger-this)
 2. [Install on the Pi](#2-install-on-the-pi)
-3. [Install Ollama and a Qwen model](#3-install-ollama-and-a-qwen-model)
+3. [Install Ollama and a Qwen model](#3-install-ollama-and-a-qwen-model) (plus [a Piper voice](#31-download-a-voice-piper))
 4. [Set up Google Calendar API access](#4-set-up-google-calendar-api-access)
 5. [Configure](#5-configure)
 6. [Test it](#6-test-it)
@@ -96,7 +101,7 @@ mkdir -p secrets audio_cache
 ```
 
 **Give the Pi and the speaker fixed IPs.** Set a DHCP reservation for each
-one on your router. The speaker downloads the MP3 from the Pi, so the Pi's
+one on your router. The speaker downloads the audio from the Pi, so the Pi's
 address needs to stay the same.
 
 ---
@@ -123,6 +128,36 @@ Memory tips:
   The next message takes a few extra seconds to start, but the RAM is free the
   rest of the time.
 - Ollama only listens on `127.0.0.1:11434` by default. Leave it that way.
+
+### 3.1 Download a voice (Piper)
+
+```bash
+.venv/bin/python scripts/download_voice.py          # downloads PIPER_VOICE (default en_GB-jenny_dioco-medium)
+```
+
+You can listen to every voice at <https://rhasspy.github.io/piper-samples/>.
+Piper has no Australian voice, so British ones are the closest. Some good
+English options:
+
+| Voice | Sounds like |
+|---|---|
+| `en_GB-jenny_dioco-medium` (default) | Warm female, southern English |
+| `en_GB-cori-high` | Clear female, higher quality, a little slower to render |
+| `en_GB-alan-medium` | Male, British |
+| `en_GB-northern_english_male-medium` | Male, northern English |
+| `en_US-lessac-medium` | Neutral US female, very clear |
+| `en_US-ryan-high` | US male |
+
+To switch voices, run `scripts/download_voice.py <name>`, set
+`PIPER_VOICE=<name>` in `.env`, and restart the server. "Medium" voices are
+about 60 MB and render a 30-second briefing in roughly 2–4 s on a Pi 5.
+`PIPER_LENGTH_SCALE=1.1` slows the speech down slightly.
+
+To fine-tune the pauses, change `TTS_SECTION_PAUSE_MS` (between sections) and
+`TTS_HEADING_PAUSE_MS` (after "Weather." / "Calendar.").
+
+If the voice file is missing or Piper fails, the server falls back to gTTS
+automatically. To always use gTTS, set `TTS_ENGINE=gtts`.
 
 ---
 
@@ -269,7 +304,7 @@ journalctl -u homenotifier -f          # live logs
 The unit:
 - starts after the network and `ollama.service`
 - restarts on failure
-- is capped at 512 MB RAM and runs at a lower CPU priority, so it plays nicely
+- is capped at 768 MB RAM and runs at a lower CPU priority, so it plays nicely
   with your other services
 - uses a read-only filesystem, apart from `audio_cache/` and `secrets/`.
   Both directories must exist before the service starts.
@@ -305,7 +340,14 @@ The server already handles the edge cases for you:
 3. **Action:** *Connectivity → HTTP Request*.
    - Method: `POST`
    - URL: `http://<pi-ip>:8765/arrive`
-   - Headers: `Authorization` = `Bearer <token>`
+   - **Headers** tab → **+** → Parameter name: `Authorization`, Value:
+     `Bearer <token>`. Type both values in yourself. The list of device
+     functions that appears is just MacroDroid's optional "insert variable"
+     helper, so you can ignore it.
+   - Leave **Use authorisation** (username/password) **unticked**. That's HTTP
+     Basic auth, which this server doesn't use.
+   - Simplest alternative: skip the header and use the URL
+     `http://<pi-ip>:8765/arrive?token=<token>`.
 4. When prompted, grant **Location** permission ("Allow all the time"). Since
    Android 10, apps need it to read the Wi-Fi name. Also turn off battery
    optimisation for MacroDroid.
@@ -358,7 +400,7 @@ counts as an arrival.
 | GET/POST | `/arrive?force=&delay=` | yes | Trigger the arrival briefing (returns 202 immediately) |
 | GET | `/preview` | yes | Build the briefing text without speaking it |
 | POST | `/say` `{"text": "..."}` | yes | Speak any text |
-| GET/HEAD | `/audio/{file}.mp3` | no | Used by the speaker to fetch audio |
+| GET/HEAD | `/audio/{file}.wav\|.mp3` | no | Used by the speaker to fetch audio |
 
 Auth can be sent as `Authorization: Bearer <token>`, `X-Auth-Token: <token>`,
 or `?token=<token>`.
@@ -374,6 +416,7 @@ or `?token=<token>`.
 | `Calendar unavailable` in logs | Service account: make sure the calendar is shared with it and `GOOGLE_CALENDAR_ID` is your email address. OAuth: run `authorize_google.py` again and publish the app (see the 7-day warning). |
 | `invalid_grant` after a week | The OAuth app is still in "Testing". Publish it, then authorise again. |
 | Message is the plain template | Ollama isn't reachable or timed out. Check `systemctl status ollama` and `ollama ps`, or raise `OLLAMA_TIMEOUT_SECONDS`. |
+| Voice sounds robotic (gTTS) instead of Piper | The log says `Piper TTS failed`. Run `scripts/download_voice.py`, and check that `PIPER_VOICE` matches the file name in `voices/`. |
 | Model invents events | Use a bigger model (`qwen2.5:3b`), or lower the temperature in [llm.py](homenotifier/llm.py). |
 | Phone trigger never fires | Grant the automation app "Allow all the time" location access and turn off battery optimisation for it. |
 | Wrong times | Set `HN_TIMEZONE`, or fix the Pi's timezone: `sudo timedatectl set-timezone Australia/Sydney`. |

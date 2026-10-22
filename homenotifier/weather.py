@@ -59,10 +59,10 @@ class Weather:
     def spoken(self) -> str:
         where = f" in {settings.location_name}" if settings.location_name else ""
         return (
-            f"Currently {self.description}{where}, {round(self.temperature)} degrees "
-            f"(feels like {round(self.feels_like)}), wind {round(self.wind_kmh)} km/h. "
-            f"Today's range {round(self.today_min)} to {round(self.today_max)} degrees, "
-            f"{self.rain_chance}% chance of rain."
+            f"Right now it's {self.description}{where} and {round(self.temperature)} degrees, "
+            f"feeling like {round(self.feels_like)}, with wind at {round(self.wind_kmh)} kilometres per hour. "
+            f"Today ranges from {round(self.today_min)} to {round(self.today_max)} degrees, "
+            f"with a {self.rain_chance} percent chance of rain."
         )
 
 

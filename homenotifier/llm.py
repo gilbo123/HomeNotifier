@@ -1,7 +1,12 @@
-"""Turn the raw facts into a short, natural spoken greeting using Ollama."""
+"""Turn the raw facts into short spoken sections using Ollama.
+
+The model returns JSON with separate `greeting`, `weather` and `calendar`
+fields so the speech can have clear headings and pauses between sections.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -11,23 +16,38 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You write short spoken welcome-home messages for a smart speaker.
+SECTIONS = ("greeting", "weather", "calendar")
+
+SYSTEM_PROMPT = """You write short spoken welcome-home briefings for a smart speaker.
+Reply with JSON containing three fields:
+- "greeting": ONE short, warm sentence welcoming the person home by name. Do not mention weather or events.
+- "weather": 1 to 2 sentences about today's weather, starting with "Right now" or "Today".
+- "calendar": 1 to 3 sentences listing the events in order with their day and time,
+  starting with "Your next event is" or "You have". If there are no events, say the calendar is clear.
 Rules:
 - Use ONLY the facts provided. Never invent events, times, places or weather.
-- 3 to 5 short sentences, under 90 words total.
-- Warm and casual. Plain text only: no lists, no markdown, no emojis.
-- Mention the weather briefly, then the upcoming events in order with their times.
-- If a fact is marked unavailable, skip it without apologising at length."""
+- Plain spoken English: no lists, markdown, emojis or abbreviations like "km/h" (say "kilometres per hour").
+- If a section's facts are marked unavailable, return an empty string for it."""
+
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {name: {"type": "string"} for name in SECTIONS},
+    "required": list(SECTIONS),
+}
 
 
-def build_prompt(name: str, time_of_day: str, weather: str, events: list[str]) -> str:
-    events_text = "\n".join(f"- {e}" for e in events) if events else "- No upcoming events."
+def build_prompt(name: str, time_of_day: str, weather: str, events: list[str] | None) -> str:
+    if events is None:
+        events_text = "- unavailable"
+    elif events:
+        events_text = "\n".join(f"- {e}" for e in events)
+    else:
+        events_text = "- No upcoming events."
     return (
         f"Person's name: {name}\n"
         f"Time of day: {time_of_day}\n"
         f"Weather: {weather}\n"
-        f"Next calendar events:\n{events_text}\n\n"
-        "Write the welcome-home message now."
+        f"Next calendar events:\n{events_text}"
     )
 
 
@@ -37,14 +57,16 @@ def _clean(text: str) -> str:
     return " ".join(text.split())
 
 
-async def generate_message(prompt: str) -> str:
+async def generate_sections(prompt: str) -> dict[str, str]:
+    """Return {"greeting": ..., "weather": ..., "calendar": ...}; values may be empty."""
     payload: dict = {
         "model": settings.ollama_model,
         "system": SYSTEM_PROMPT,
         "prompt": prompt,
         "stream": False,
+        "format": RESPONSE_SCHEMA,  # Ollama structured output
         "keep_alive": settings.ollama_keep_alive,
-        "options": {"temperature": 0.4, "num_predict": 200},
+        "options": {"temperature": 0.4, "num_predict": 300},
     }
     if settings.ollama_think:
         payload["think"] = settings.ollama_think.lower() in {"1", "true", "yes", "on"}
@@ -54,9 +76,19 @@ async def generate_message(prompt: str) -> str:
         if resp.status_code == 404:
             raise RuntimeError(f"Ollama model {settings.ollama_model!r} not found - run: ollama pull {settings.ollama_model}")
         resp.raise_for_status()
-        text = _clean(resp.json().get("response", ""))
+        raw = resp.json().get("response", "")
 
-    if not text:
-        raise RuntimeError("Ollama returned an empty response")
-    log.info("LLM message: %s", text)
-    return text
+    try:
+        data = json.loads(_clean_json(raw))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Ollama returned invalid JSON: {raw[:200]!r}") from exc
+
+    sections = {name: _clean(str(data.get(name, ""))) for name in SECTIONS}
+    log.info("LLM sections: %s", sections)
+    return sections
+
+
+def _clean_json(raw: str) -> str:
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    return raw[start : end + 1] if start != -1 and end != -1 else raw
