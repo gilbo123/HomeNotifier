@@ -56,6 +56,13 @@ def load_piper():
         if _piper_voice is None:
             from piper import PiperVoice  # imported lazily so gTTS-only setups don't need it
 
+            try:  # hide harmless onnxruntime warnings (e.g. telemetry ID can't be saved
+                import onnxruntime  # under systemd's read-only home); errors still show
+
+                onnxruntime.set_default_logger_severity(3)
+            except Exception:  # noqa: BLE001
+                pass
+
             path = _voice_path()
             if not path.exists():
                 raise RuntimeError(
