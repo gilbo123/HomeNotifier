@@ -114,6 +114,7 @@ class Settings:
 
     # --- Piper TTS ---
     piper_voice: str = field(default_factory=lambda: _str("PIPER_VOICE", "en_US-danny-low"))
+    
     piper_voice_dir: Path = field(default_factory=lambda: _path("PIPER_VOICE_DIR", "voices"))
     # >1.0 = slower speech, <1.0 = faster
     piper_length_scale: float = field(default_factory=lambda: _float("PIPER_LENGTH_SCALE", 1.0))
