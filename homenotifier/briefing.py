@@ -1,4 +1,4 @@
-"""Assemble calendar + weather + LLM into a spoken arrival briefing."""
+"""Assemble greeting + BYD battery + weather + calendar into a spoken arrival briefing."""
 
 from __future__ import annotations
 
@@ -6,33 +6,69 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from . import calendar_client, llm, speaker, weather
+from . import byd, calendar_client, llm, speaker, weather
 from .config import settings
 from .speaker import Pause, Script
 from .timeutil import now
 
 log = logging.getLogger(__name__)
 
-WEATHER_HEADING = "Weather."
-CALENDAR_HEADING = "Calendar."
-
 
 @dataclass
 class Briefing:
     greeting: str
+    battery_percent: float | None = None
     weather: str = ""  # spoken weather section ("" = skip)
     calendar: str = ""  # spoken calendar section ("" = skip)
     events: list[str] = field(default_factory=list)
-    used_llm: bool = True
+    used_llm: bool = False
 
     def script(self) -> Script:
-        """Greeting, then each section as: heading, short pause, body, longer pause."""
-        heading_pause = Pause(settings.tts_heading_pause_ms)
-        section_pause = Pause(settings.tts_section_pause_ms)
-        script: Script = [self.greeting]
-        for heading, body in ((WEATHER_HEADING, self.weather), (CALENDAR_HEADING, self.calendar)):
-            if body:
-                script += [section_pause, heading, heading_pause, body]
+        """Construct the arrival script with the requested pause cadence:
+        
+        "Welcome home Gilbert!" [2 x pause]
+        "Lord of the manor." [4 x pause]
+        "King of the castle" [4 x pause]
+        "Battery:" [pause] "BYD battery percentage is: {percent}" [2 x pause]
+        (if not sunny and clear): "Weather:" [pause] "The weather ...." [2 x pause]
+        "Calendar:" [pause] "Your next..."
+        """
+        p1 = Pause(settings.tts_heading_pause_ms)
+        p2 = Pause(settings.tts_heading_pause_ms * 2)
+        p4 = Pause(settings.tts_heading_pause_ms * 4)
+
+        script: Script = [
+            f"Welcome home {settings.owner_name}!",
+            p2,
+            "Lord of the manor.",
+            p4,
+            "King of the castle.",
+            p4,
+        ]
+
+        if self.battery_percent is not None:
+            script += [
+                "Battery:",
+                p1,
+                f"BYD battery percentage is: {round(self.battery_percent)} percent",
+                p2,
+            ]
+
+        if self.weather:
+            script += [
+                "Weather:",
+                p1,
+                self.weather,
+                p2,
+            ]
+
+        if self.calendar:
+            script += [
+                "Calendar:",
+                p1,
+                self.calendar,
+            ]
+
         return script
 
     @property
@@ -61,46 +97,64 @@ def _template_calendar(events: list[str]) -> str:
 async def build_briefing() -> Briefing:
     today = now().date()
 
+    battery_task = byd.get_battery_percentage()
     weather_task = weather.get_weather()
     events_task = asyncio.to_thread(calendar_client.get_upcoming_events)
-    weather_res, events_res = await asyncio.gather(weather_task, events_task, return_exceptions=True)
+    battery_res, weather_res, events_res = await asyncio.gather(
+        battery_task, weather_task, events_task, return_exceptions=True
+    )
 
+    if isinstance(battery_res, Exception) or battery_res is None:
+        if isinstance(battery_res, Exception):
+            log.warning("BYD battery unavailable: %s", battery_res)
+        battery_percent = None
+    else:
+        battery_percent = float(battery_res)
+
+    weather_spoken = ""
+    weather_facts = None
     if isinstance(weather_res, Exception):
         log.warning("Weather unavailable: %s", weather_res)
-        weather_facts = None
     else:
         weather_facts = weather_res.spoken()
+        # Only announce weather if not sunny and clear
+        if not weather_res.is_sunny_and_clear:
+            weather_spoken = weather_facts
+        else:
+            log.info("Weather is sunny and clear; omitting weather section")
 
     if isinstance(events_res, Exception):
         log.warning("Calendar unavailable: %s", events_res)
         events: list[str] | None = None
+        calendar_spoken = ""
     else:
         events = [e.spoken(today) for e in events_res]
+        calendar_spoken = _template_calendar(events)
 
-    # Deterministic versions - used if the LLM fails or leaves a section empty.
-    template = {
-        "greeting": f"Welcome home, {settings.owner_name}. Good {_time_of_day()}.",
-        "weather": weather_facts or "",
-        "calendar": _template_calendar(events) if events is not None else "",
-    }
-
-    prompt = llm.build_prompt(settings.owner_name, _time_of_day(), weather_facts or "unavailable", events)
-    try:
-        sections = await llm.generate_sections(prompt)
-        used_llm = True
-    except Exception as exc:  # noqa: BLE001 - always say *something*
-        log.warning("LLM failed (%s); using template message", exc)
-        sections, used_llm = {}, False
-
-    def pick(name: str) -> str:
-        if not template[name]:  # facts unavailable -> skip the section entirely
-            return ""
-        return sections.get(name) or template[name]
+    # Optional LLM refinement for weather and calendar phrasing
+    used_llm = False
+    if weather_spoken or calendar_spoken:
+        prompt = llm.build_prompt(
+            settings.owner_name,
+            _time_of_day(),
+            weather_facts if weather_spoken else "unavailable",
+            events if calendar_spoken else None,
+        )
+        try:
+            sections = await llm.generate_sections(prompt)
+            if weather_spoken and sections.get("weather"):
+                weather_spoken = sections["weather"]
+            if calendar_spoken and sections.get("calendar"):
+                calendar_spoken = sections["calendar"]
+            used_llm = True
+        except Exception as exc:  # noqa: BLE001 - keep template phrasing
+            log.warning("LLM failed (%s); using template message", exc)
 
     return Briefing(
-        greeting=pick("greeting"),
-        weather=pick("weather"),
-        calendar=pick("calendar"),
+        greeting=f"Welcome home {settings.owner_name}!",
+        battery_percent=battery_percent,
+        weather=weather_spoken,
+        calendar=calendar_spoken,
         events=events or [],
         used_llm=used_llm,
     )

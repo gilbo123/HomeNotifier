@@ -3,25 +3,29 @@
 A small server for a Raspberry Pi 5 that notices when you get home and has your
 Google Nest / Home speaker give you a short spoken briefing:
 
-> "Welcome home Gilbert, hope your afternoon went well!
-> *(pause)* **Weather.** *(pause)* Right now it's partly cloudy and 21 degrees, with a
-> 10 percent chance of rain.
-> *(pause)* **Calendar.** *(pause)* Your next event is Dentist tomorrow at 9:30 AM, then
-> Team standup at 10 AM, and Mum's birthday dinner on Saturday at 6 PM."
+> "Welcome home Gilbert!" *(pause)*
+> "Lord of the manor." *(pause)*
+> "King of the castle" *(pause)*
+> "Battery: BYD battery percentage is: 56 percent" *(pause)*
+> "Weather: The weather right now is partly cloudy and 21 degrees..." *(omitted if sunny and clear)*
+> "Calendar: Your next event is Team standup at 10 AM..."
 
 ```mermaid
 flowchart LR
     phone["Android phone (joins home Wi-Fi)"] -- "HTTP /arrive" --> server
     ping["Optional: Wi-Fi ping watcher"] --> server
-    server["HomeNotifier (FastAPI on Pi)"] --> cal["Google Calendar API: next 3 events"]
+    server["HomeNotifier (FastAPI on Pi)"] --> byd["BYD vehicle API: battery %"]
+    server --> cal["Google Calendar API: next 3 events"]
     server --> wx["Open-Meteo weather"]
-    server --> llm["Ollama: qwen2.5:1.5b"]
+    server --> llm["Ollama: optional phrasing"]
     server --> tts["Piper local voice to WAV"]
     tts --> speaker["Google Nest speaker (Cast)"]
 ```
 
+- **Greeting:** royal welcome-home sequence with custom pause timing.
+- **BYD Battery:** live vehicle battery percentage via `pybyd`.
+- **Weather:** [Open-Meteo](https://open-meteo.com/). Free, no API key. Spoken only if not sunny and clear!
 - **Calendar:** Google Calendar API (read-only).
-- **Weather:** [Open-Meteo](https://open-meteo.com/). Free, no API key.
 - **Wording:** a small Qwen model running locally in Ollama writes separate
   greeting, weather and calendar sections. If Ollama is down you still get a
   plain template message.

@@ -16,6 +16,33 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
+def _load_bashrc_env() -> None:
+    """If BYD credentials aren't already set, check ~/.bashrc, ~/.zshrc, and /home/server/.bashrc."""
+    candidates = [
+        Path.home() / ".bashrc",
+        Path.home() / ".zshrc",
+        Path("/home/server/.bashrc"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                for line in candidate.read_text(errors="ignore").splitlines():
+                    line = line.strip()
+                    if line.startswith("export "):
+                        line = line[7:].strip()
+                    if "=" in line and not line.startswith("#"):
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip("'\"")
+                        if key.startswith("BYD_") and key not in os.environ:
+                            os.environ[key] = val
+            except Exception:
+                pass
+
+
+_load_bashrc_env()
+
+
 def _str(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
@@ -66,7 +93,7 @@ class Settings:
     log_level: str = field(default_factory=lambda: _str("HN_LOG_LEVEL", "INFO"))
 
     # --- Arrival behaviour ---
-    owner_name: str = field(default_factory=lambda: _str("HN_OWNER_NAME", "there"))
+    owner_name: str = field(default_factory=lambda: _str("HN_OWNER_NAME", "Gilbert"))
     cooldown_minutes: int = field(default_factory=lambda: _int("HN_COOLDOWN_MINUTES", 30))
     arrival_delay_seconds: int = field(default_factory=lambda: _int("HN_ARRIVAL_DELAY_SECONDS", 20))
     # e.g. "22:00-07:00" - no announcements in this window. Empty = disabled.
@@ -113,7 +140,7 @@ class Settings:
     tts_section_pause_ms: int = field(default_factory=lambda: _int("TTS_SECTION_PAUSE_MS", 900))
 
     # --- Piper TTS ---
-    piper_voice: str = field(default_factory=lambda: _str("PIPER_VOICE", "en_US-danny-low"))
+    piper_voice: str = field(default_factory=lambda: _str("PIPER_VOICE", "en_US-bryce-medium"))
     
     piper_voice_dir: Path = field(default_factory=lambda: _path("PIPER_VOICE_DIR", "voices"))
     # >1.0 = slower speech, <1.0 = faster
@@ -124,9 +151,22 @@ class Settings:
     presence_interval_seconds: int = field(default_factory=lambda: _int("PRESENCE_INTERVAL_SECONDS", 30))
     presence_away_minutes: int = field(default_factory=lambda: _int("PRESENCE_AWAY_MINUTES", 20))
 
+    # --- BYD Vehicle ---
+    byd_username: str = field(default_factory=lambda: _str("BYD_USERNAME"))
+    byd_password: str = field(default_factory=lambda: _str("BYD_PASSWORD"))
+    byd_base_url: str = field(
+        default_factory=lambda: _str("BYD_BASE_URL", "https://dilinkappoversea-au.byd.auto")
+    )
+    byd_country_code: str = field(default_factory=lambda: _str("BYD_COUNTRY_CODE", "AU"))
+    byd_vin: str = field(default_factory=lambda: _str("BYD_VIN"))
+
     def __post_init__(self) -> None:
         self.public_base_url = self._normalise_base_url(self.public_base_url)
         self.audio_dir.mkdir(parents=True, exist_ok=True)
+        if self.byd_base_url and "BYD_BASE_URL" not in os.environ:
+            os.environ["BYD_BASE_URL"] = self.byd_base_url
+        if self.byd_country_code and "BYD_COUNTRY_CODE" not in os.environ:
+            os.environ["BYD_COUNTRY_CODE"] = self.byd_country_code
 
     def _normalise_base_url(self, url: str) -> str:
         """Accept '192.168.1.5', '192.168.1.5:8765' or a full URL; always return scheme://host:port."""

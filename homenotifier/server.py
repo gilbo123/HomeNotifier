@@ -118,6 +118,7 @@ async def preview() -> dict:
     return {
         "message": b.message,
         "greeting": b.greeting,
+        "battery_percent": b.battery_percent,
         "weather": b.weather,
         "calendar": b.calendar,
         "events": b.events,

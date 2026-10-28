@@ -45,12 +45,66 @@ _piper_voice = None
 _piper_lock = threading.Lock()
 
 
+PIPER_BASE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+
+
 def _voice_path() -> Path:
     return settings.piper_voice_dir / f"{settings.piper_voice}.onnx"
 
 
+def voice_url(voice: str, suffix: str) -> str:
+    """Hugging Face download URL for a voice file (.onnx or .onnx.json)."""
+    parts = voice.split("-")
+    if len(parts) < 3:
+        raise ValueError(f"Voice names look like 'en_GB-jenny_dioco-medium', got {voice!r}")
+    lang_region, name, quality = parts[0], "-".join(parts[1:-1]), parts[-1]
+    lang = lang_region.split("_")[0]
+    return f"{PIPER_BASE_URL}/{lang}/{lang_region}/{name}/{quality}/{voice}{suffix}"
+
+
+def download_voice(voice: str, dest_dir: Path) -> Path:
+    """Download a Piper voice (.onnx + .onnx.json) from Hugging Face."""
+    import httpx
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    onnx_file = dest_dir / f"{voice}.onnx"
+    json_file = dest_dir / f"{voice}.onnx.json"
+
+    for suffix, target in ((".onnx.json", json_file), (".onnx", onnx_file)):
+        if target.exists() and target.stat().st_size > 0:
+            continue
+        url = voice_url(voice, suffix)
+        log.info("Downloading Piper voice file: %s", url)
+        tmp = target.with_suffix(target.suffix + ".part")
+        with httpx.stream("GET", url, follow_redirects=True, timeout=120) as resp:
+            if resp.status_code == 404:
+                raise RuntimeError(
+                    f"Piper voice {voice!r} not found at {url}. "
+                    "Check the voice name at https://rhasspy.github.io/piper-samples/"
+                )
+            resp.raise_for_status()
+            with tmp.open("wb") as f:
+                for chunk in resp.iter_bytes(1 << 16):
+                    f.write(chunk)
+        tmp.rename(target)
+        log.info("Downloaded %s (%.1f MB)", target.name, target.stat().st_size / 1e6)
+    return onnx_file
+
+
+def ensure_voice(voice: str | None = None, dest_dir: Path | None = None) -> Path:
+    """Ensure the voice (.onnx and .onnx.json) exists, downloading if necessary."""
+    v = voice or settings.piper_voice
+    d = dest_dir or settings.piper_voice_dir
+    onnx_path = d / f"{v}.onnx"
+    json_path = d / f"{v}.onnx.json"
+    if not onnx_path.exists() or not json_path.exists():
+        log.info("Piper voice %s not found at %s; downloading...", v, d)
+        download_voice(v, d)
+    return onnx_path
+
+
 def load_piper():
-    """Load (once) and return the Piper voice. Thread-safe."""
+    """Load (once) and return the Piper voice, downloading if missing. Thread-safe."""
     global _piper_voice
     with _piper_lock:
         if _piper_voice is None:
@@ -63,12 +117,7 @@ def load_piper():
             except Exception:  # noqa: BLE001
                 pass
 
-            path = _voice_path()
-            if not path.exists():
-                raise RuntimeError(
-                    f"Piper voice not found at {path}. "
-                    f"Run: python scripts/download_voice.py {settings.piper_voice}"
-                )
+            path = ensure_voice(settings.piper_voice, settings.piper_voice_dir)
             t0 = time.monotonic()
             _piper_voice = PiperVoice.load(str(path))
             log.info("Loaded Piper voice %s in %.1f s", settings.piper_voice, time.monotonic() - t0)

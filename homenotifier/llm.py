@@ -21,9 +21,9 @@ SECTIONS = ("greeting", "weather", "calendar")
 SYSTEM_PROMPT = """You write short spoken welcome-home briefings for a smart speaker.
 Reply with JSON containing three fields:
 - "greeting": ONE short, warm sentence welcoming the person home by name. Do not mention weather or events.
-- "weather": 1 to 2 sentences about today's weather, starting with "Right now" or "Today".
+- "weather": 1 to 2 sentences about today's weather, starting with "The weather right now" or "The weather is".
 - "calendar": 1 to 3 sentences listing the events in order with their day and time,
-  starting with "Your next event is" or "You have". If there are no events, say the calendar is clear.
+  starting with "Your next event is". If there are no events, say the calendar is clear.
 Rules:
 - Use ONLY the facts provided. Never invent events, times, places or weather.
 - Plain spoken English: no lists, markdown, emojis or abbreviations like "km/h" (say "kilometres per hour").

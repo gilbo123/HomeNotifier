@@ -48,6 +48,7 @@ WMO_CODES = {
 
 @dataclass
 class Weather:
+    weather_code: int
     description: str
     temperature: float
     feels_like: float
@@ -56,10 +57,15 @@ class Weather:
     today_min: float
     rain_chance: int
 
+    @property
+    def is_sunny_and_clear(self) -> bool:
+        """True if skies are clear or mainly clear (WMO 0 or 1) and rain chance is low (< 20%)."""
+        return self.weather_code in (0, 1) and self.rain_chance < 20
+
     def spoken(self) -> str:
         where = f" in {settings.location_name}" if settings.location_name else ""
         return (
-            f"Right now it's {self.description}{where} and {round(self.temperature)} degrees, "
+            f"The weather right now is {self.description}{where} and {round(self.temperature)} degrees, "
             f"feeling like {round(self.feels_like)}, with wind at {round(self.wind_kmh)} kilometres per hour. "
             f"Today ranges from {round(self.today_min)} to {round(self.today_max)} degrees, "
             f"with a {self.rain_chance} percent chance of rain."
@@ -84,8 +90,10 @@ async def get_weather() -> Weather:
         data = resp.json()
 
     cur, daily = data["current"], data["daily"]
+    code = cur.get("weather_code", 0)
     weather = Weather(
-        description=WMO_CODES.get(cur["weather_code"], "unsettled weather"),
+        weather_code=code,
+        description=WMO_CODES.get(code, "unsettled weather"),
         temperature=cur["temperature_2m"],
         feels_like=cur["apparent_temperature"],
         wind_kmh=cur["wind_speed_10m"],
@@ -93,5 +101,5 @@ async def get_weather() -> Weather:
         today_min=daily["temperature_2m_min"][0],
         rain_chance=daily["precipitation_probability_max"][0] or 0,
     )
-    log.info("Weather: %s", weather.spoken())
+    log.info("Weather (code=%d, sunny_and_clear=%s): %s", code, weather.is_sunny_and_clear, weather.spoken())
     return weather
